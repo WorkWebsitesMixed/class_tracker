@@ -97,14 +97,42 @@ CSV column contract and the aSc export notes live in `scripts/README.md`.
 - Google OAuth (login / callback / session-refresh proxy)
 - Production build is clean
 
+- Notifications: end-of-block Web Push + Google Chat fallback, deep-linking to
+  `/?session=<id>` (see "Notifications" below)
+
 **Not started (schema already supports these)**
-- Notifications: pg_cron at block-end -> Edge Function -> Web Push (table
-  `push_subscriptions` exists) + Google Chat webhook fallback; deep link
-  `/?session=<id>`
 - Admin compliance panel (real-time board, filter by reason/teacher, exports) —
   protected by `is_staff()`
-- PWA manifest + service worker (Serwist) for installability/offline shell
+- PWA manifest + service worker for installability/offline shell (note: `sw.js`
+  already exists for push; a manifest + icons are still needed to install)
 - aSc PDF -> CSV converter (currently the CSV is produced from aSc export)
+
+## Notifications (pg_cron -> Edge Function -> Web Push / Chat)
+
+Flow: `pg_cron` runs `trigger_block_end_notify()` every 5 min -> `pg_net` POSTs
+the `notify-block-end` Edge Function -> it reads `sessions_to_notify()` (ended,
+unreported, not yet notified), sends Web Push to each device in
+`push_subscriptions`, optionally posts the Google Chat webhook, and stamps
+`class_sessions.notified_at`. The teacher taps the notification -> `/?session=<id>`
+opens the exact card. Migration: `0002_notifications.sql`.
+
+One-time setup:
+```bash
+npx web-push generate-vapid-keys              # -> .env.local NEXT_PUBLIC_VAPID_PUBLIC_KEY + VAPID_*
+supabase functions deploy notify-block-end
+supabase secrets set VAPID_PUBLIC_KEY=... VAPID_PRIVATE_KEY=... \
+  VAPID_SUBJECT=mailto:admin@school.edu.co APP_URL=https://<app-domain> \
+  GOOGLE_CHAT_WEBHOOK_URL=...                  # webhook optional
+```
+Then, in the Supabase SQL editor, store the cron's secrets so it stops being a
+no-op:
+```sql
+select vault.create_secret('https://<ref>.functions.supabase.co/notify-block-end','notify_edge_url');
+select vault.create_secret('<service_role_key>','notify_service_key');
+```
+Client: `src/components/push-manager.tsx` registers `public/sw.js`, asks
+permission, and saves the subscription via the `savePushSubscription` action.
+Requires HTTPS (works on localhost for testing).
 
 ## Gotchas
 

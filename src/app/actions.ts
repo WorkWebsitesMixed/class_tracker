@@ -48,3 +48,31 @@ export async function submitReport(input: {
   revalidatePath("/");
   return { ok: true };
 }
+
+/** Persist a Web Push subscription for the signed-in teacher (RLS-scoped). */
+export async function savePushSubscription(sub: {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}): Promise<ReportResult> {
+  const supabase = await createSupabaseServer();
+
+  const { data: authData } = await supabase.auth.getUser();
+  if (!authData.user?.email) return { ok: false, error: "Not authenticated" };
+
+  const { data: teacher } = await supabase
+    .from("teachers")
+    .select("id")
+    .eq("email", authData.user.email)
+    .single();
+  if (!teacher) return { ok: false, error: "No teacher profile linked" };
+
+  const { error } = await supabase
+    .from("push_subscriptions")
+    .upsert(
+      { teacher_id: teacher.id, ...sub },
+      { onConflict: "endpoint" },
+    );
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}

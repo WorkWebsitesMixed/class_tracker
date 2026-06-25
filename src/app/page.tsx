@@ -7,6 +7,7 @@ import {
   type SessionCard,
 } from "@/lib/queries";
 import { ReportCard } from "@/components/report-card";
+import { PushManager } from "@/components/push-manager";
 
 export const dynamic = "force-dynamic"; // always reflect the current time
 
@@ -60,6 +61,8 @@ export default async function Home({
           No hay clases terminadas pendientes de reporte.
         </div>
       )}
+
+      <PushManager />
 
       {pending.length > 0 && (
         <section>
