@@ -18,13 +18,18 @@ supabase/migrations/0001_init.sql   # full schema, RLS, views, session-gen funct
 scripts/                            # data import pipeline (see scripts/README.md)
   import-calendar.ts                #   xlsx month-grid -> calendar_days  (VALIDATED on real file)
   import-schedule.ts                #   normalized CSV -> versioned timetable, then publish
+  convert-schedule-xlsx.ts          #   aSc per-teacher xlsx -> normalized CSV (deduplicates same-start-time slots)
+  sync-teachers.ts                  #   syncs teachers table from docentes_correo.xlsx (word-subset name matching)
+  seed-demo.ts                      #   seeds 2 weeks of backdated sessions + reports for demo teachers
   lib/db.ts                         #   service-role client + dimension upserts
 src/
   app/page.tsx                      # fast dashboard: most-recently-completed class card
   app/actions.ts                    # submitReport server action (RLS-safe upsert)
   app/login/, app/auth/callback/    # Google OAuth flow
+  app/admin/                        # coordinator/admin compliance panel
   components/report-card.tsx        # one-tap Given / Missed + reason dropdown
   lib/queries.ts                    # getDashboardCard / getPendingToday / getReasons
+  lib/admin-queries.ts              # requireStaff / getDay / getDailyCompliance
   lib/supabase/{server,client}.ts   # SSR + browser clients
   proxy.ts                          # session refresh (Next 16 renamed "middleware" -> "proxy")
 source_data/                        # raw exports (binaries git-ignored)
@@ -54,6 +59,15 @@ source_data/                        # raw exports (binaries git-ignored)
    admins see all. The dashboard view uses `security_invoker = true` so the
    caller's RLS actually applies through it.
 
+## Production
+
+- **URL:** https://class-tracker-hazel.vercel.app
+- **Supabase project:** `ksnvfqogryktuivmszyk`
+- **Repo:** https://github.com/WorkWebsitesMixed/class_tracker
+- Deployed via Vercel — auto-deploys on push to `main`
+- Google OAuth client registered in Google Cloud Console; callback URL is
+  `https://ksnvfqogryktuivmszyk.supabase.co/auth/v1/callback`
+
 ## First-time setup on a new machine
 
 ```bash
@@ -61,53 +75,78 @@ git clone https://github.com/WorkWebsitesMixed/class_tracker.git
 cd class_tracker
 npm install
 cp .env.example .env.local      # fill in Supabase + Google + VAPID values
-
-# local DB (Docker required)
-npx supabase init               # only if supabase/config.toml is absent
-npx supabase start
-npx supabase db reset           # applies 0001_init.sql
-
 npm run dev
 ```
 
-Copy the raw exports into `source_data/` (they're git-ignored — grab from Drive).
+The Supabase project is remote — no local Docker needed. `.env.local` needs:
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+`SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_WORKSPACE_DOMAIN`, `APP_URL`.
+
+Copy raw exports into the project root before running import scripts
+(they're git-ignored — grab from Drive or the machine where they were last used).
 
 ## Data import (re-runnable)
 
 ```sql
+-- Run once in Supabase SQL editor; copy the returned id
 insert into academic_years (name, start_date, end_date)
 values ('2026-2027','2026-08-03','2027-06-30') returning id;
 ```
 
 ```bash
-npm run import:calendar -- "source_data/School Calendar 2026-2027.xlsx" <year_id>
-npm run import:schedule -- source_data/schedule.csv <year_id> 2026-08-03 "v1 — start of year"
+# 1. Calendar (xlsx)
+npm run import:calendar -- "School Calendar 2026-2027.xlsx" <year_id>
+
+# 2. Convert schedule xlsx -> CSV (auto-generates teacher emails; review teacher-emails-generated.csv)
+npx tsx scripts/convert-schedule-xlsx.ts "horarios_para_cada_profesor.xlsx" schedule-converted.csv
+# After correcting emails:
+npx tsx scripts/convert-schedule-xlsx.ts "horarios_para_cada_profesor.xlsx" schedule-converted.csv --email-map=teacher-emails-generated.csv
+
+# 3. Import schedule
+npm run import:schedule -- schedule-converted.csv <year_id> 2026-08-03 "v1 — inicio de año"
+
+# 4. Sync teacher emails from HR file (after import)
+npm run sync:teachers -- docentes_correo.xlsx            # dry run first
+npm run sync:teachers -- docentes_correo.xlsx --delete   # apply + remove unmatched teachers
 ```
 
-CSV column contract and the aSc export notes live in `scripts/README.md`.
+Note: `sync:teachers` uses word-subset matching to handle the name-format difference
+between the schedule xlsx (FIRST LAST) and the HR file (LAST FIRST).
+
+## Demo / testing data
+
+```bash
+npx tsx scripts/seed-demo.ts          # seeds 2 weeks of backdated sessions for demo teachers
+npx tsx scripts/seed-demo.ts --clear  # wipe and re-seed
+```
+
+Demo teachers: `andres.forero@marymount.edu.co` (admin) and
+`felipe.velasquez@marymount.edu.co` (teacher). Set `role = 'teacher'` in the
+`teachers` table to test the non-admin view.
 
 ## Status
 
 **Done**
 - Schema + RLS + session generation + versioning
 - Calendar importer (validated against the real xlsx)
-- Schedule importer (CSV -> versioned timetable -> publish)
+- Schedule importer (xlsx → CSV converter + CSV → DB)
+- Teacher sync script (HR xlsx → DB, with fuzzy name matching)
+- Demo seed script (backdated sessions + realistic report mix)
 - Fast teacher dashboard: context-aware card, one-tap Given/Missed, reason
   dropdown + free-text, pending-today list, `?session=` deep links
 - Google OAuth (login / callback / session-refresh proxy)
-- Production build is clean
-
 - Notifications: end-of-block Web Push + Google Chat fallback, deep-linking to
   `/?session=<id>` (see "Notifications" below)
 - Admin compliance panel at `/admin` — staff-gated (`requireStaff()`), daily
   summary cards, filter by status/teacher/reason, CSV export, live-refresh via
-  Realtime on `class_reports`. Schema: `0003_admin.sql` (extends the card view +
-  `v_daily_compliance`). Teacher dashboard shows an "Admin" link to staff.
+  Realtime on `class_reports`
+- Deployed to Vercel + Supabase (production)
 
-**Not started (schema already supports these)**
-- PWA manifest + service worker for installability/offline shell (note: `sw.js`
-  already exists for push; a manifest + icons are still needed to install)
-- aSc PDF -> CSV converter (currently the CSV is produced from aSc export)
+**Decided but not built**
+- Coordinator reporting panel (multi-dimensional, see "Next session" below)
+- Notification timing: currently end-of-class; owner prefers start-of-class
+  (requires changing trigger + dashboard card filter — see "Next session" below)
+- PWA manifest + icons for installability (sw.js exists for push; manifest missing)
 
 ## Notifications (pg_cron -> Edge Function -> Web Push / Chat)
 
@@ -136,9 +175,44 @@ Client: `src/components/push-manager.tsx` registers `public/sw.js`, asks
 permission, and saves the subscription via the `savePushSubscription` action.
 Requires HTTPS (works on localhost for testing).
 
+## Next session — open questions
+
+Three questions need answers before building the coordinator reporting panel:
+
+**1. Terms**
+Does the school have fixed academic terms with names and dates
+(e.g. "Term 1: Aug 3 – Oct 17")? If yes, add a `terms` table so the filter
+is a dropdown. If no, use a free date-range picker. This shapes the DB schema.
+
+**2. "Lost class" definition**
+Should a class count as "lost/not dictated" only when a teacher explicitly
+reports it as *missed* — or also when the class ended and was never reported
+at all (unreported + past scheduled_end)? The latter is stricter and more
+accurate. Coordinator's call.
+
+**3. Weekday breakdown**
+Should the report include a Monday–Friday breakdown in addition to DAY 1–5?
+Since the rotation doesn't align to weekdays, "Mondays are worse" is unlikely
+to be meaningful here — but confirm with the coordinator.
+
+Once answered, the plan is:
+- New `/admin` tab "Informes" (keep existing daily view as "Diario")
+- Date range selector with presets (term / year / custom)
+- Summary table: Total · Dictadas · No dictadas · Sin reportar · % Cumplimiento
+- Grouping options: por docente / por grupo / por DAY / por día de semana
+- CSV export of whatever is on screen
+- New DB view or function for aggregate compliance across date ranges
+
 ## Gotchas
 
 - `gh` CLI is not installed locally; use plain `git` over HTTPS.
 - Next 16 uses `src/proxy.ts` (not `middleware.ts`).
 - `xlsx` is CJS; scripts import it as `import * as XLSX` (works under tsx).
 - Build needs no secrets, but runtime/auth does — set `.env.local`.
+- The schedule xlsx has per-cell time overrides — some periods share the same
+  start time on a given cycle day (data entry in aSc). The converter deduplicates
+  by (teacher, cycle_day, start_time), keeping the first occurrence.
+- Teacher name format differs between files: schedule xlsx = FIRST LAST,
+  HR file (docentes_correo.xlsx) = LAST FIRST. The sync script handles this.
+- 3 teachers in docentes_correo.xlsx had no schedule match and were left out:
+  CELIS MUÑOZ VALENTINA, POSSO MANUEL SEBASTIEN, ZUIDERDUIJN BRUVIER CAMILLE.
