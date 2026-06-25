@@ -99,10 +99,12 @@ CSV column contract and the aSc export notes live in `scripts/README.md`.
 
 - Notifications: end-of-block Web Push + Google Chat fallback, deep-linking to
   `/?session=<id>` (see "Notifications" below)
+- Admin compliance panel at `/admin` — staff-gated (`requireStaff()`), daily
+  summary cards, filter by status/teacher/reason, CSV export, live-refresh via
+  Realtime on `class_reports`. Schema: `0003_admin.sql` (extends the card view +
+  `v_daily_compliance`). Teacher dashboard shows an "Admin" link to staff.
 
 **Not started (schema already supports these)**
-- Admin compliance panel (real-time board, filter by reason/teacher, exports) —
-  protected by `is_staff()`
 - PWA manifest + service worker for installability/offline shell (note: `sw.js`
   already exists for push; a manifest + icons are still needed to install)
 - aSc PDF -> CSV converter (currently the CSV is produced from aSc export)

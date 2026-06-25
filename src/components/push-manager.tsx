@@ -18,16 +18,14 @@ export function PushManager() {
   const [state, setState] = useState<State>("default");
 
   useEffect(() => {
-    if (
-      typeof window === "undefined" ||
-      !("serviceWorker" in navigator) ||
-      !("PushManager" in window) ||
-      !VAPID
-    ) {
-      setState("unsupported");
-      return;
-    }
-    setState(Notification.permission as State);
+    // Client-only capability + permission read; must run after mount.
+    const supported =
+      typeof window !== "undefined" &&
+      "serviceWorker" in navigator &&
+      "PushManager" in window &&
+      !!VAPID;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setState(supported ? (Notification.permission as State) : "unsupported");
   }, []);
 
   async function enable() {

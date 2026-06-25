@@ -41,17 +41,26 @@ export default async function Home({
   }
 
   const { session } = await searchParams;
-  const [card, reasons, pending] = await Promise.all([
+  const [card, reasons, pending, me] = await Promise.all([
     getDashboardCard(session),
     getReasons(),
     getPendingToday(),
+    supabase.from("teachers").select("role").eq("email", auth.user.email!).maybeSingle(),
   ]);
+  const isStaff = me.data?.role === "coordinator" || me.data?.role === "admin";
 
   return (
     <main className="mx-auto min-h-dvh max-w-md space-y-6 p-4 sm:p-6">
       <header className="flex items-center justify-between pt-2">
         <h1 className="text-lg font-semibold text-slate-900">Mis clases</h1>
-        <span className="text-sm text-slate-400">{auth.user.email}</span>
+        <div className="flex items-center gap-3">
+          {isStaff && (
+            <Link href="/admin" className="text-sm font-medium text-slate-600 underline">
+              Admin
+            </Link>
+          )}
+          <span className="text-sm text-slate-400">{auth.user.email}</span>
+        </div>
       </header>
 
       {card ? (
