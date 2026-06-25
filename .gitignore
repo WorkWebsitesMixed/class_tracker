@@ -45,3 +45,7 @@ next-env.d.ts
 /source_data/*.pdf
 /source_data/*.xlsx
 /source_data/*.csv
+
+# generated import artifacts (root-level, also git-ignored)
+/*.xlsx
+/*.csv

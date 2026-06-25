@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "import:calendar": "tsx scripts/import-calendar.ts",
-    "import:schedule": "tsx scripts/import-schedule.ts"
+    "import:schedule": "tsx scripts/import-schedule.ts",
+    "convert:schedule": "tsx scripts/convert-schedule-xlsx.ts",
+    "sync:teachers": "tsx scripts/sync-teachers.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
